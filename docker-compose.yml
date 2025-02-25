@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres
+    container_name: auth_db
+    restart: always
+    environment:
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_password
+      POSTGRES_DB: auth_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    container_name: auth_backend
+    restart: always
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://auth_user:auth_password@db:5432/auth_db
+    command: >
+      sh -c "
+      until pg_isready -h db -p 5432; do
+      echo 'Waiting for PostgreSQL to start...';
+      sleep 3;
+      done;
+      alembic upgrade head;
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    container_name: auth_frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      BASE_URL: "http://backend:8000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+  redis:
+    image: redis:alpine
+    container_name: auth_redis
+
+  kafka:
+    image: wurstmeister/kafka
+    container_name: auth_kafka
+    environment:
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE_KAFKA
+      KAFKA_ADVERTISED_LISTENERS: INSIDE_KAFKA://kafka:9092
+      KAFKA_LISTENERS: INSIDE_KAFKA://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_LISTENER_NAME_INSIDE: INSIDE_KAFKA
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_PORT: 9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE_KAFKA:PLAINTEXT
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    container_name: auth_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  worker:
+    build: ./worker
+    container_name: auth_worker
+    depends_on:
+      - kafka
+    environment:
+      - TELEGRAM_BOT_TOKEN=7774580875:AAFo1jWNCoe1jAwYAKiRCMh8wuq5QW0JZi4
+
+volumes:
+  postgres_data:
